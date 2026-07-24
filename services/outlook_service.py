@@ -77,23 +77,60 @@ def find_unknown_outlook_tokens(text: str) -> list:
         if token in OUTLOOK_TOKEN_ALIASES or token in seen:
             continue
         seen.add(token)
-        unknown.append(token)
-    return unknown
+    for token in raw_tokens:
+        if token not in OUTLOOK_FRIENDLY_TOKENS:
+            unknown.append(token)
+    return list(dict.fromkeys(unknown))
+
+def render_outlook_template(template_text: str, template_values: dict) -> str:
+    if not template_text:
+        return ""
+
+    result = template_text
+    for token, val in template_values.items():
+        result = result.replace(token, str(val))
+
+    unknown_tokens = find_unknown_outlook_tokens(result)
+    if unknown_tokens:
+        logger.warning(f"미치환 템플릿 토큰 존재: {unknown_tokens}")
+
+    return result
+
+def normalize_recipient_addresses(raw_addresses) -> list:
+    if not raw_addresses:
+        return []
+
+    if isinstance(raw_addresses, list):
+        candidates = raw_addresses
+    else:
+        text = str(raw_addresses).replace(',', ';')
+        candidates = text.split(';')
+
+    result = []
+    seen = set()
+    for item in candidates:
+        email = str(item).strip()
+        if email:
+            key = email.lower()
+            if key not in seen:
+                seen.add(key)
+                result.append(email)
+
+    return result
 
 def create_outlook_draft(report_data: dict, output_paths: tuple) -> str:
-    """아웃룩 메일 초안을 생성한다.
-    절대 메일을 자동 전송(Send)하지 않고 Display()를 통해 초안 창만 표시한다.
-
-    반환값:
-      "created"  - 초안 생성 성공
-      "disabled" - OUTLOOK_ENABLE=False 로 비활성 상태
-      "failed"   - 초안 생성 중 오류 발생
-    """
+    """PDF/PNG 생성 후 Outlook 초안 메일을 작성(Display)한다. 절대 자동 발송(Send)하지 않는다."""
     if os.getenv("OUTLOOK_ENABLE", "False") != "True":
         logger.info("아웃룩 기능 비활성화로 메일 초안 생성을 건너뜁니다.")
         return "disabled"
 
     output_xlsx, output_pdf, output_png = output_paths
+
+    norm_pdf = os.path.abspath(os.path.normpath(output_pdf)) if output_pdf else ""
+    if not os.path.exists(norm_pdf) or os.path.getsize(norm_pdf) == 0:
+        logger.error("PDF 첨부 파일이 미존재하거나 0바이트여서 아웃룩 초안 생성을 중단합니다.")
+        return "failed"
+
     logger.info("아웃룩 초안 생성 시작")
     
     # 1. 수신자 / 참조 주소 정제 (세미콜론 분할 및 중복 제거)
@@ -119,6 +156,7 @@ def create_outlook_draft(report_data: dict, output_paths: tuple) -> str:
     template_values = build_outlook_template_values(report_data)
     final_subject = render_outlook_template(subject_tmpl, template_values)
     final_body_text = render_outlook_template(body_tmpl, template_values)
+    escaped_body = html.escape(final_body_text).replace('\n', '<br>')
 
     # 2. 아웃룩 실행
     try:
@@ -141,11 +179,11 @@ def create_outlook_draft(report_data: dict, output_paths: tuple) -> str:
             if selected_account is not None:
                 try:
                     mail.SendUsingAccount = selected_account
-                    logger.info(f"지정 발신 계정 적용 완료: {sender_email}")
+                    logger.info("지정 발신 계정 적용 완료")
                 except Exception:
                     logger.exception("발신 계정 적용 실패 (기본 계정으로 진행)")
             else:
-                logger.warning(f"지정한 발신 계정을 찾지 못함: {sender_email} (기본 계정 사용)")
+                logger.warning("지정한 발신 계정을 찾지 못함 (기본 계정 사용)")
 
         if target_email:
             mail.To = target_email
@@ -153,31 +191,34 @@ def create_outlook_draft(report_data: dict, output_paths: tuple) -> str:
             mail.CC = cc_email
         
         mail.Subject = final_subject
-        
-        if os.path.exists(output_pdf):
-            mail.Attachments.Add(output_pdf)
-        
-        if os.path.exists(output_png):
-            attachment = mail.Attachments.Add(output_png)
-            attachment.PropertyAccessor.SetProperty("http://schemas.microsoft.com/mapi/proptag/0x3712001F", "daily_report_img")
-        
-        html_content = final_body_text.replace("\n", "<br>")
-        
-        mail.HTMLBody = f"""
-        <html>
-        <body style="font-family: 'Malgun Gothic', sans-serif; font-size: 11pt;">
-            <p>{html_content}</p>
-            <br>
-            <img src='cid:daily_report_img' width='650'>
-        </body>
-        </html>
-        """
-        
-        # 안전 정책: 자동 전송(Send) 절대 금지, Display() 호출로 검토 유도
+
+        # 메일 초안 창 먼저 표시 (Outlook 기본 서명이 자동 생성됨)
         mail.Display()
+        existing_signature_html = mail.HTMLBody or ""
+
+        # PNG 유효 시 CID 본문 이미지 구성
+        img_tag = ""
+        norm_png = os.path.abspath(os.path.normpath(output_png)) if output_png else ""
+        if os.path.exists(norm_png) and os.path.getsize(norm_png) > 0:
+            try:
+                attachment = mail.Attachments.Add(norm_png)
+                attachment.PropertyAccessor.SetProperty("http://schemas.microsoft.com/mapi/proptag/0x3712001F", "daily_report_img")
+                img_tag = "<br><br><img src='cid:daily_report_img'>"
+            except Exception:
+                logger.exception("PNG 본문 이미지 CID 첨부 중 예외 발생")
+
+        # PDF 필수 첨부
+        try:
+            mail.Attachments.Add(norm_pdf)
+        except Exception:
+            logger.exception("PDF 파일 메일 첨부 중 예외 발생")
+
+        # HTML 본문 + 이미지 + 기존 서명 병합
+        mail.HTMLBody = f'<div style="font-family: \'맑은 고딕\', Arial; font-size: 10pt;">{escaped_body}{img_tag}</div><br>{existing_signature_html}'
+
         logger.info("아웃룩 메일 초안 창 표시 완료 (자동 전송 안 함)")
         return "created"
 
     except Exception:
-        logger.exception("아웃룩 연동 실패")
+        logger.exception("아웃룩 메일 초안 생성 중 예외 발생")
         return "failed"

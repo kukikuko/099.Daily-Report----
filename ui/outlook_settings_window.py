@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from config import (
     ENV_PATH, DEFAULT_SUBJECT, DEFAULT_BODY, OUTLOOK_FRIENDLY_TOKENS
 )
+from utils.logger_utils import logger
 from utils.file_utils import save_env_dict_atomically
 from services.outlook_service import (
     normalize_recipient_addresses, find_unknown_outlook_tokens
@@ -30,8 +31,9 @@ def insert_token_into_text(text_widget, token: str):
 def open_addressbook_window(parent_window, target_entry_widget):
     try:
         contacts = load_addressbook_contacts()
-    except Exception as e:
-        messagebox.showerror("주소록 오류", str(e), parent=parent_window)
+    except Exception:
+        logger.exception("주소록 로드 중 예외 발생")
+        messagebox.showerror("주소록 오류", "⚠️ 주소록 파일(주소록.csv)을 읽을 수 없습니다.\n파일 존재 여부 및 형식/인코딩을 확인해 주세요.", parent=parent_window)
         return
 
     addressbook_email_keys = {c["email_lower"] for c in contacts}
@@ -163,11 +165,13 @@ def save_outlook_settings_gui(widgets: dict, window: tk.Toplevel):
         save_env_dict_atomically(env_dict, ENV_PATH)
         load_dotenv(ENV_PATH, override=True)
 
+        logger.info("아웃룩 설정 저장 성공")
         messagebox.showinfo("성공", "✅ 아웃룩 설정이 저장되었습니다!", parent=window)
         window.destroy()
 
-    except Exception as e:
-        messagebox.showerror("오류", f"저장 중 오류 발생: {e}", parent=window)
+    except Exception:
+        logger.exception("아웃룩 설정 저장 중 예외 발생")
+        messagebox.showerror("오류", "❌ 아웃룩 설정 저장 중 오류가 발생했습니다.\n자세한 내용은 로그를 확인해주세요.", parent=window)
 
 def open_outlook_settings_window(root: tk.Tk):
     load_dotenv(ENV_PATH, override=True)

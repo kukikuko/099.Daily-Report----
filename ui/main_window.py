@@ -11,7 +11,7 @@ from config import (
     ENV_PATH, TEMPLATE_PATH, BASE_DIR, DEFAULT_SUBJECT, DEFAULT_BODY
 )
 from utils.logger_utils import logger, open_log_folder
-from utils.file_utils import is_file_locked
+from utils.file_utils import is_file_locked, ensure_dir_writable
 from utils.path_utils import sanitize_filename_part, parse_doc_number
 from services.excel_service import generate_excel_draft, export_final_reports
 from services.outlook_service import create_outlook_draft
@@ -104,19 +104,27 @@ def thread_step2_export_pdf(root_window, output_paths, report_data):
         update_status("3/3 PDF/PNG 변환 중...")
         time.sleep(1)
 
-        if export_final_reports(output_xlsx, output_pdf, output_png):
+        result = export_final_reports(output_xlsx, output_pdf, output_png)
+
+        if result.is_full_success or result.is_partial_success:
+            if result.is_partial_success:
+                logger.warning("PNG 캡처는 실패했으나 PDF 생성이 완료되어 부분 성공으로 진행합니다.")
+
             update_status("메일 초안 생성 중...")
 
             outlook_status = create_outlook_draft(report_data, output_paths)
             if outlook_status == "created":
-                update_status("🎉 모든 작업 완료! (메일 창 확인)")
+                if result.is_partial_success:
+                    update_status("🎉 작업 완료! (PNG 본문 이미지 제외, 메일 창 확인)")
+                else:
+                    update_status("🎉 모든 작업 완료! (메일 창 확인)")
             elif outlook_status == "disabled":
-                update_status("✅ PDF/PNG 변환 완료 (아웃룩 자동 작성 비활성)")
+                update_status("✅ PDF 변환 완료 (아웃룩 자동 작성 비활성)")
                 root_window.after(
                     0,
                     lambda: messagebox.showinfo(
                         "아웃룩 비활성",
-                        "PDF/PNG 생성은 완료되었습니다.\n\n"
+                        "PDF 생성은 완료되었습니다.\n\n"
                         "아웃룩 자동 작성 기능이 꺼져 있어 메일 초안은 생성하지 않았습니다.\n"
                         "메인 화면의 '📧 아웃룩 설정'에서 사용 체크 후 저장하면 다음부터 자동 생성됩니다.",
                         parent=root_window,
@@ -132,7 +140,7 @@ def thread_step2_export_pdf(root_window, output_paths, report_data):
                     0,
                     lambda: messagebox.showwarning(
                         "아웃룩 연동 안내",
-                        "PDF/PNG 생성은 완료되었지만 아웃룩 메일 초안을 만들지 못했습니다.\n\n"
+                        "PDF 생성은 완료되었지만 아웃룩 메일 초안을 만들지 못했습니다.\n\n"
                         "Outlook 실행/로그인 상태와 기본 프로필 설정을 확인한 뒤 다시 시도해 주세요.\n"
                         "지금은 열리는 PDF를 첨부해 수동으로 발송할 수 있습니다.",
                         parent=root_window,
@@ -189,6 +197,17 @@ def start_automation_wrapper(root_window):
     final_output_dir = os.path.join(year_output_dir, month_folder)
     if not os.path.exists(final_output_dir):
         os.makedirs(final_output_dir, exist_ok=True)
+
+    if not ensure_dir_writable(final_output_dir):
+        messagebox.showerror(
+            "권한 오류",
+            "⚠️ 출력 폴더에 파일을 생성/작성할 권한이 없습니다.\n\n"
+            f"경로: {final_output_dir}\n"
+            "폴더 권한 또는 저장 경로 설정을 확인해 주세요.",
+            parent=root_window
+        )
+        update_status("작업 중단됨 (권한 부족)")
+        return
 
     auto_num = get_auto_doc_number(year_output_dir)
 
@@ -261,9 +280,21 @@ def start_automation_wrapper(root_window):
 
     base_name = f"FMS{year_short}_{safe_dept}{safe_emp_id}_{safe_user_num} @ Daily Report_{date_str}"
     
-    output_xlsx = os.path.join(final_output_dir, base_name + ".xlsx")
-    output_pdf = os.path.join(final_output_dir, base_name + ".pdf")
-    output_png = os.path.join(final_output_dir, base_name + ".png")
+    output_xlsx = os.path.abspath(os.path.normpath(os.path.join(final_output_dir, base_name + ".xlsx")))
+    output_pdf = os.path.abspath(os.path.normpath(os.path.join(final_output_dir, base_name + ".pdf")))
+    output_png = os.path.abspath(os.path.normpath(os.path.join(final_output_dir, base_name + ".png")))
+
+    if is_file_locked(output_xlsx):
+        logger.warning(f"생성 대상 엑셀 파일이 이미 열려 있음: {os.path.basename(output_xlsx)}")
+        messagebox.showwarning(
+            "파일 열림 경고",
+            f"⚠️ 생성 대상 엑셀 파일이 이미 열려 있습니다.\n\n"
+            f"파일명: {os.path.basename(output_xlsx)}\n\n"
+            "Excel을 저장하고 완전히 닫은 뒤 다시 시도해 주세요.",
+            parent=root_window
+        )
+        update_status("작업 취소됨 (파일 열림)")
+        return
 
     existing_files = [f for f in [output_xlsx, output_pdf, output_png] if os.path.exists(f)]
     if existing_files:
@@ -299,6 +330,9 @@ def start_automation_wrapper(root_window):
     )
     t.start()
 
+import sys
+from ui.initial_setup_window import ensure_initial_setup
+
 def main_gui():
     global status_label, start_button, settings_button, outlook_button
 
@@ -306,6 +340,11 @@ def main_gui():
 
     root = tk.Tk()
     root.withdraw()
+
+    if not ensure_initial_setup(root):
+        logger.info("사용자에 의해 초기 설정 마법사가 취소되어 프로그램을 종료합니다.")
+        root.destroy()
+        sys.exit(0)
 
     def on_closing():
         logger.info("Daily Report Automation 프로그램 종료")

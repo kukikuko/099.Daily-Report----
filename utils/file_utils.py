@@ -1,13 +1,52 @@
 import os
+import sys
+import uuid
 from config import ENV_PATH
 from utils.logger_utils import logger
 
-def is_file_locked(filepath: str) -> bool:
-    """파일이 다른 프로세스에 의해 사용 중(잠김)인지 확인한다."""
-    if not os.path.exists(filepath):
+def ensure_dir_writable(dir_path: str) -> bool:
+    """지정한 디렉터리에 쓰기 권한이 존재하는지 사전 검사한다."""
+    if not dir_path:
         return False
+    norm_path = os.path.abspath(os.path.normpath(dir_path))
+    if not os.path.exists(norm_path):
+        try:
+            os.makedirs(norm_path, exist_ok=True)
+        except OSError:
+            logger.exception(f"출력 디렉터리 생성 실패: {norm_path}")
+            return False
+
+    test_file = os.path.join(norm_path, f".write_test_{uuid.uuid4().hex}.tmp")
     try:
-        os.rename(filepath, filepath)
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write("write_permission_check")
+        if os.path.exists(test_file):
+            os.remove(test_file)
+        return True
+    except (OSError, IOError):
+        logger.exception(f"디렉터리 쓰기 권한 없음: {norm_path}")
+        return False
+
+def is_file_locked(filepath: str) -> bool:
+    """파일이 다른 프로세스(사용자의 Excel 창 등)에 의해 사용 중(잠김)인지 확인한다.
+    OneDrive 및 한글 경로 환경에서도 안전하게 점유 상태를 감지한다.
+    """
+    if not filepath:
+        return False
+    norm_path = os.path.abspath(os.path.normpath(filepath))
+    if not os.path.exists(norm_path):
+        return False
+
+    # 1단계: os.rename 시도를 통한 점유 감지
+    try:
+        os.rename(norm_path, norm_path)
+    except OSError:
+        return True
+
+    # 2단계: 독점 쓰기 오픈 시도를 통한 감지
+    try:
+        fd = os.open(norm_path, os.O_RDWR)
+        os.close(fd)
         return False
     except OSError:
         return True

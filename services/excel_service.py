@@ -2,8 +2,25 @@ import os
 import time
 from datetime import date, timedelta
 import win32com.client as win32
-from config import CELL_MAP
+from dataclasses import dataclass
+from config import CELL_MAP, REPORT_PRINT_AREA, REPORT_IMAGE_RANGE
 from utils.logger_utils import logger
+
+@dataclass
+class ExportResult:
+    pdf_success: bool = False
+    png_success: bool = False
+    pdf_path: str = ""
+    png_path: str = ""
+    error_message: str = ""
+
+    @property
+    def is_full_success(self) -> bool:
+        return self.pdf_success and self.png_success
+
+    @property
+    def is_partial_success(self) -> bool:
+        return self.pdf_success and not self.png_success
 
 def get_week_dates():
     today = date.today()
@@ -22,8 +39,11 @@ def create_excel_application(visible=False):
     return excel
 
 def generate_excel_draft(report_data: dict, output_xlsx: str, template_path: str, weekly_locations: list, holiday_indices: list = None) -> bool:
-    if not os.path.exists(template_path):
-        logger.error(f"템플릿 파일을 찾을 수 없습니다: {template_path}")
+    norm_template_path = os.path.abspath(os.path.normpath(template_path)) if template_path else ""
+    norm_output_xlsx = os.path.abspath(os.path.normpath(output_xlsx)) if output_xlsx else ""
+
+    if not os.path.exists(norm_template_path):
+        logger.error(f"템플릿 파일을 찾을 수 없습니다: {norm_template_path}")
         return False
 
     excel = None
@@ -31,7 +51,12 @@ def generate_excel_draft(report_data: dict, output_xlsx: str, template_path: str
     logger.info("독립 Excel 인스턴스로 초안 생성 시작")
     try:
         excel = create_excel_application(visible=False)
-        wb = excel.Workbooks.Open(template_path)
+        try:
+            wb = excel.Workbooks.Open(norm_template_path)
+        except Exception:
+            logger.exception(f"엑셀 템플릿 Workbooks.Open 실패 ({os.path.basename(norm_template_path)})")
+            raise
+
         ws = wb.Worksheets(1)
 
         for key, addr in CELL_MAP.items():
@@ -58,22 +83,21 @@ def generate_excel_draft(report_data: dict, output_xlsx: str, template_path: str
                 is_red = True
             else:
                 val = weekly_locations[i] if i < len(weekly_locations) else ""
-                is_red = False
-                if val:
-                    for keyword in red_keywords:
-                        if keyword in str(val):
-                            is_red = True
-                            break
-            cell.Value = val
-            cell.Font.Color = 255 if is_red else 0
+                is_red = any(k in str(val) for k in red_keywords)
 
-        wb.SaveAs(output_xlsx)
+            cell.Value = val
+            if is_red:
+                cell.Font.Color = 255
+            else:
+                cell.Font.ColorIndex = -4105
+
+        wb.SaveAs(norm_output_xlsx)
+        logger.info(f"Excel 파일 저장 완료: {os.path.basename(norm_output_xlsx)}")
         wb.Close(SaveChanges=False)
         wb = None
-        logger.info("엑셀 초안 생성 완료")
         return True
     except Exception:
-        logger.exception("엑셀 초안 생성 실패")
+        logger.exception("Excel 초안 생성 중 예외 발생")
         return False
     finally:
         if wb:
@@ -87,51 +111,92 @@ def generate_excel_draft(report_data: dict, output_xlsx: str, template_path: str
             except Exception:
                 logger.exception("Excel Application 종료 중 예외 발생")
 
-def export_final_reports(xlsx_path: str, pdf_path: str, png_path: str) -> bool:
-    if not os.path.exists(xlsx_path):
-        logger.error(f"PDF/PNG 변환 실패: 대상 엑셀 파일 없음 ({xlsx_path})")
-        return False
+def export_final_reports(xlsx_path: str, pdf_path: str, png_path: str) -> ExportResult:
+    norm_xlsx_path = os.path.abspath(os.path.normpath(xlsx_path)) if xlsx_path else ""
+    norm_pdf_path = os.path.abspath(os.path.normpath(pdf_path)) if pdf_path else ""
+    norm_png_path = os.path.abspath(os.path.normpath(png_path)) if png_path else ""
+
+    result = ExportResult(pdf_path=norm_pdf_path, png_path=norm_png_path)
+
+    if not os.path.exists(norm_xlsx_path):
+        err_msg = f"대상 엑셀 파일 없음 ({norm_xlsx_path})"
+        logger.error(f"PDF/PNG 변환 실패: {err_msg}")
+        result.error_message = err_msg
+        return result
 
     excel = None
     wb = None
-    logger.info(f"독립 Excel 인스턴스로 PDF/PNG 변환 시작: {os.path.basename(xlsx_path)}")
+    chart_shape = None
+
+    logger.info(f"독립 Excel 인스턴스로 PDF/PNG 변환 시작: {os.path.basename(norm_xlsx_path)}")
     try:
         excel = create_excel_application(visible=True)
-        wb = excel.Workbooks.Open(xlsx_path)
+        try:
+            wb = excel.Workbooks.Open(norm_xlsx_path)
+        except Exception as e:
+            err_msg = f"변환 대상 엑셀 Workbooks.Open 실패 ({os.path.basename(norm_xlsx_path)})"
+            logger.exception(err_msg)
+            result.error_message = err_msg
+            return result
+
         ws = wb.Worksheets(1)
         ws.Activate()
-
-        time.sleep(2)
-
-        wb.ExportAsFixedFormat(0, pdf_path)
-        logger.info("PDF 내보내기 성공")
-
-        excel.ActiveWindow.ScrollRow = 1
-        excel.ActiveWindow.ScrollColumn = 1
-
-        rng = ws.Range("A2:I16")
-        rng.Select()
         time.sleep(1)
 
-        rng.CopyPicture(1, 2)
+        # 1. PDF 내보내기 (인쇄 범위 지정 A1:I27)
+        try:
+            ws.PageSetup.PrintArea = REPORT_PRINT_AREA
+            wb.ExportAsFixedFormat(0, norm_pdf_path)
+            if os.path.exists(norm_pdf_path) and os.path.getsize(norm_pdf_path) > 0:
+                result.pdf_success = True
+                logger.info(f"PDF 내보내기 성공 (영역: {REPORT_PRINT_AREA})")
+            else:
+                logger.error("PDF 파일이 생성을 완료하지 못했거나 0바이트입니다.")
+        except Exception:
+            logger.exception("PDF 내보내기 중 예외 발생")
 
-        chart = ws.Shapes.AddChart2()
-        chart.Select()
-        excel.Selection.Width = rng.Width
-        excel.Selection.Height = rng.Height
-        chart.Chart.Paste()
-        time.sleep(1)
+        # 2. PNG 이미지 내보내기 (범위 전체 확대 A2:I27 & Chart 안전 삭제)
+        try:
+            excel.ActiveWindow.ScrollRow = 1
+            excel.ActiveWindow.ScrollColumn = 1
 
-        chart.Chart.Export(png_path)
-        chart.Delete()
-        logger.info("PNG 내보내기 성공")
+            rng = ws.Range(REPORT_IMAGE_RANGE)
+            rng.Select()
+            time.sleep(1)
+
+            rng.CopyPicture(1, 2)
+
+            chart_shape = ws.Shapes.AddChart2()
+            chart_shape.Select()
+            excel.Selection.Width = rng.Width
+            excel.Selection.Height = rng.Height
+            chart_shape.Chart.Paste()
+            time.sleep(1)
+
+            chart_shape.Chart.Export(norm_png_path)
+
+            if os.path.exists(norm_png_path) and os.path.getsize(norm_png_path) > 0:
+                result.png_success = True
+                logger.info(f"PNG 내보내기 성공 (영역: {REPORT_IMAGE_RANGE})")
+            else:
+                logger.error("PNG 파일이 생성을 완료하지 못했거나 0바이트입니다.")
+        except Exception:
+            logger.exception("PNG 내보내기 중 예외 발생")
+        finally:
+            if chart_shape is not None:
+                try:
+                    chart_shape.Delete()
+                except Exception:
+                    logger.exception("임시 Chart Shape 삭제 중 예외 발생")
 
         wb.Close(SaveChanges=False)
         wb = None
-        return True
-    except Exception:
-        logger.exception("PDF/PNG 변환 실패")
-        return False
+        return result
+
+    except Exception as e:
+        logger.exception("PDF/PNG 내보내기 종합 예외 발생")
+        result.error_message = str(e)
+        return result
     finally:
         if wb:
             try:

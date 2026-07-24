@@ -15,9 +15,12 @@ DATA_FILE_PATH = os.path.join(BASE_DIR, 'weekly_data.json')
 TEMPLATE_PATH = os.path.join(BUNDLE_DIR, "Template", "Daily_Report_Template.xlsx")
 ADDRESSBOOK_FILENAME = "주소록.csv"
 
-# --- 로깅 경로 설정 ---
+# --- 로깅 및 백업 경로 설정 ---
 LOG_DIR = os.path.join(BASE_DIR, 'Logs')
 LOG_FILE_PATH = os.path.join(LOG_DIR, 'daily_report.log')
+BACKUP_DIR = os.path.join(BASE_DIR, 'Data', 'backups')
+if not os.path.exists(BACKUP_DIR):
+    os.makedirs(BACKUP_DIR, exist_ok=True)
 
 # --- 정규식 패턴 ---
 INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -34,6 +37,10 @@ CELL_MAP = {
     "tomorrow_work": "B18", 
     "notes": "B23",
 }
+
+# --- 보고서 인쇄 및 이미지 범위 ---
+REPORT_PRINT_AREA = "A1:I27"
+REPORT_IMAGE_RANGE = "A2:I27"
 
 # --- 기본 메일 템플릿 및 토큰 ---
 DEFAULT_SUBJECT = "Daily Report_[[년]]년 [[월]]월 [[일]]일"

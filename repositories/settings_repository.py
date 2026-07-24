@@ -2,7 +2,7 @@ import os
 import json
 import shutil
 from datetime import datetime
-from config import BASE_DIR, ENV_PATH, DEFAULT_SUBJECT, DEFAULT_BODY
+from config import BASE_DIR, BACKUP_DIR, ENV_PATH, DEFAULT_SUBJECT, DEFAULT_BODY
 from utils.logger_utils import logger
 from utils.file_utils import save_env_dict_atomically
 
@@ -44,11 +44,13 @@ def migrate_env_if_needed():
     if added:
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_path = os.path.join(BASE_DIR, f"env_backup_{timestamp}.env")
+            if not os.path.exists(BACKUP_DIR):
+                os.makedirs(BACKUP_DIR, exist_ok=True)
+            backup_path = os.path.join(BACKUP_DIR, f"env_backup_{timestamp}.env")
             shutil.copy2(ENV_PATH, backup_path)
             logger.info(f".env 사전 백업 생성 완료: {os.path.basename(backup_path)}")
         except Exception:
             logger.exception(".env 사전 백업 생성 중 예외 발생")
 
         save_env_dict_atomically(env_dict, ENV_PATH)
-        logger.info(f".env 마이그레이션 완료 (추가 항목: {added})")
+        logger.info(f".env 마이그레이션 완료 (추가 항목 수: {len(added)})")

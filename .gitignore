@@ -2,13 +2,26 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# Environment and backup files
 .env
+*.env
+!.env.example
+env_backup_*.env
+
+# Output & Data
 Output/
 Logs/
+Data/
 Data/drafts/
+Data/backups/
+
+# Build artifacts
 build/
 dist/
 *.spec
+
+# IDE & sub-agents
 .agents/
 .claude/
 _e2e_test_output/
