@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+Output/
+Logs/
+Data/drafts/
+build/
+dist/
+*.spec
