@@ -9,3 +9,6 @@ Data/drafts/
 build/
 dist/
 *.spec
+.agents/
+.claude/
+_e2e_test_output/
