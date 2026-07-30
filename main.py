@@ -1,6 +1,6 @@
-import sys
 from repositories.settings_repository import migrate_env_if_needed
 from ui.main_window import main_gui
+
 
 def main():
     # 실행 시 누락된 .env 키 마이그레이션 및 사전 백업

@@ -1,21 +1,17 @@
-import os
 import json
+import os
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
+
 from dotenv import load_dotenv
 
-from config import (
-    ENV_PATH, DEFAULT_SUBJECT, DEFAULT_BODY, OUTLOOK_FRIENDLY_TOKENS
-)
-from utils.logger_utils import logger
-from utils.file_utils import save_env_dict_atomically
-from services.outlook_service import (
-    normalize_recipient_addresses, find_unknown_outlook_tokens
-)
+from config import DEFAULT_BODY, DEFAULT_SUBJECT, ENV_PATH, OUTLOOK_FRIENDLY_TOKENS
+from repositories.addressbook_repository import load_addressbook_contacts, merge_selected_recipients
 from repositories.settings_repository import load_env_dict
-from repositories.addressbook_repository import (
-    load_addressbook_contacts, merge_selected_recipients
-)
+from services.outlook_service import find_unknown_outlook_tokens, normalize_recipient_addresses
+from utils.file_utils import save_env_dict_atomically
+from utils.logger_utils import logger
+
 
 def insert_token_into_entry(entry_widget, token: str):
     try:

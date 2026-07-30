@@ -1,7 +1,9 @@
-import os
 import csv
+import os
+
+from services.outlook_service import dedupe_email_list, normalize_recipient_addresses
 from utils.path_utils import resolve_addressbook_csv_path
-from services.outlook_service import normalize_recipient_addresses, dedupe_email_list
+
 
 def load_addressbook_contacts() -> list:
     csv_path = resolve_addressbook_csv_path()

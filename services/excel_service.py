@@ -1,26 +1,13 @@
 import os
 import time
 from datetime import date, timedelta
+
 import win32com.client as win32
-from dataclasses import dataclass
-from config import CELL_MAP, REPORT_PRINT_AREA, REPORT_IMAGE_RANGE
+
+from config import CELL_MAP, REPORT_IMAGE_RANGE, REPORT_PRINT_AREA
+from models.export_result import ExportResult
 from utils.logger_utils import logger
 
-@dataclass
-class ExportResult:
-    pdf_success: bool = False
-    png_success: bool = False
-    pdf_path: str = ""
-    png_path: str = ""
-    error_message: str = ""
-
-    @property
-    def is_full_success(self) -> bool:
-        return self.pdf_success and self.png_success
-
-    @property
-    def is_partial_success(self) -> bool:
-        return self.pdf_success and not self.png_success
 
 def get_week_dates():
     today = date.today()
@@ -32,13 +19,21 @@ def get_week_dates():
         dates.append(f"{day.day}({weekday_kor})")
     return dates
 
+
 def create_excel_application(visible=False):
     excel = win32.DispatchEx("Excel.Application")
     excel.Visible = visible
     excel.DisplayAlerts = False
     return excel
 
-def generate_excel_draft(report_data: dict, output_xlsx: str, template_path: str, weekly_locations: list, holiday_indices: list = None) -> bool:
+
+def generate_excel_draft(
+    report_data: dict,
+    output_xlsx: str,
+    template_path: str,
+    weekly_locations: list,
+    holiday_indices: list = None,
+) -> bool:
     norm_template_path = os.path.abspath(os.path.normpath(template_path)) if template_path else ""
     norm_output_xlsx = os.path.abspath(os.path.normpath(output_xlsx)) if output_xlsx else ""
 
@@ -91,7 +86,7 @@ def generate_excel_draft(report_data: dict, output_xlsx: str, template_path: str
             else:
                 cell.Font.ColorIndex = -4105
 
-        wb.SaveAs(norm_output_xlsx)
+        wb.SaveAs(norm_output_xlsx, FileFormat=51)
         logger.info(f"Excel 파일 저장 완료: {os.path.basename(norm_output_xlsx)}")
         wb.Close(SaveChanges=False)
         wb = None
@@ -111,6 +106,7 @@ def generate_excel_draft(report_data: dict, output_xlsx: str, template_path: str
             except Exception:
                 logger.exception("Excel Application 종료 중 예외 발생")
 
+
 def export_final_reports(xlsx_path: str, pdf_path: str, png_path: str) -> ExportResult:
     norm_xlsx_path = os.path.abspath(os.path.normpath(xlsx_path)) if xlsx_path else ""
     norm_pdf_path = os.path.abspath(os.path.normpath(pdf_path)) if pdf_path else ""
@@ -121,7 +117,7 @@ def export_final_reports(xlsx_path: str, pdf_path: str, png_path: str) -> Export
     if not os.path.exists(norm_xlsx_path):
         err_msg = f"대상 엑셀 파일 없음 ({norm_xlsx_path})"
         logger.error(f"PDF/PNG 변환 실패: {err_msg}")
-        result.error_message = err_msg
+        result.error_message = "대상 엑셀 파일을 찾을 수 없습니다."
         return result
 
     excel = None
@@ -133,20 +129,30 @@ def export_final_reports(xlsx_path: str, pdf_path: str, png_path: str) -> Export
         excel = create_excel_application(visible=True)
         try:
             wb = excel.Workbooks.Open(norm_xlsx_path)
-        except Exception as e:
-            err_msg = f"변환 대상 엑셀 Workbooks.Open 실패 ({os.path.basename(norm_xlsx_path)})"
-            logger.exception(err_msg)
-            result.error_message = err_msg
+        except Exception:
+            logger.exception(f"변환 대상 엑셀 Workbooks.Open 실패 ({os.path.basename(norm_xlsx_path)})")
+            result.error_message = "엑셀 파일을 여는 중 오류가 발생했습니다."
             return result
 
         ws = wb.Worksheets(1)
         ws.Activate()
         time.sleep(1)
 
-        # 1. PDF 내보내기 (인쇄 범위 지정 A1:I27)
+        # 1. PDF 내보내기 (인쇄 범위 및 페이지 맞춤 지정)
         try:
             ws.PageSetup.PrintArea = REPORT_PRINT_AREA
-            wb.ExportAsFixedFormat(0, norm_pdf_path)
+            ws.PageSetup.Zoom = False
+            ws.PageSetup.FitToPagesWide = 1
+            ws.PageSetup.FitToPagesTall = 1
+
+            ws.ExportAsFixedFormat(
+                Type=0,
+                Filename=norm_pdf_path,
+                Quality=0,
+                IncludeDocProperties=True,
+                IgnorePrintAreas=False,
+                OpenAfterPublish=False,
+            )
             if os.path.exists(norm_pdf_path) and os.path.getsize(norm_pdf_path) > 0:
                 result.pdf_success = True
                 logger.info(f"PDF 내보내기 성공 (영역: {REPORT_PRINT_AREA})")
@@ -189,13 +195,16 @@ def export_final_reports(xlsx_path: str, pdf_path: str, png_path: str) -> Export
                 except Exception:
                     logger.exception("임시 Chart Shape 삭제 중 예외 발생")
 
+        if not result.is_full_success and not result.pdf_success:
+            result.error_message = "PDF/PNG 내보내기 중 오류가 발생했습니다."
+
         wb.Close(SaveChanges=False)
         wb = None
         return result
 
-    except Exception as e:
+    except Exception:
         logger.exception("PDF/PNG 내보내기 종합 예외 발생")
-        result.error_message = str(e)
+        result.error_message = "PDF/PNG 내보내기 중 오류가 발생했습니다."
         return result
     finally:
         if wb:

@@ -1,9 +1,11 @@
-import os
 import json
-import urllib.request
+import os
 import urllib.parse
-from datetime import datetime, date, timedelta
+import urllib.request
+from datetime import date, datetime, timedelta
+
 from utils.logger_utils import logger
+
 
 def get_holidays_this_week() -> dict:
     """공공데이터포럼 API를 호출하여 이번 주(월~금) 내의 공휴일 정보를 조회한다.

@@ -1,5 +1,7 @@
 import os
-from config import BASE_DIR, BUNDLE_DIR, ADDRESSBOOK_FILENAME, INVALID_FILENAME_CHARS
+
+from config import ADDRESSBOOK_FILENAME, BASE_DIR, BUNDLE_DIR, INVALID_FILENAME_CHARS
+
 
 def sanitize_filename_part(value: str, fallback: str = "default") -> str:
     """파일명 구성 요소에 사용할 수 없는 문자를 안전하게 제거/치환한다."""

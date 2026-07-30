@@ -16,6 +16,11 @@ Data/
 Data/drafts/
 Data/backups/
 
+# Private runtime data
+주소록.csv
+weekly_data.json
+
+
 # Build artifacts
 build/
 dist/

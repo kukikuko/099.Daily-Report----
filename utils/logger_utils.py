@@ -1,7 +1,8 @@
+import logging
 import os
 import sys
-import logging
 from logging.handlers import RotatingFileHandler
+
 from config import LOG_DIR, LOG_FILE_PATH
 
 if not os.path.exists(LOG_DIR):

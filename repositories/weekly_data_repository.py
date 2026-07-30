@@ -1,19 +1,59 @@
-import os
 import json
+import os
 import re
-from datetime import date, timedelta
-from config import DATA_FILE_PATH, ENV_PATH
-from utils.logger_utils import logger
+from datetime import date, datetime, timedelta
+
 from dotenv import load_dotenv
+
+from config import BACKUP_DIR, DATA_FILE_PATH, ENV_PATH
+from utils.logger_utils import logger
+
 
 def get_monday_str() -> str:
     today = date.today()
     monday = today - timedelta(days=today.weekday())
     return monday.strftime("%Y-%m-%d")
 
+
 def normalize_default_location(value: str) -> str:
     text = str(value or "").strip()
     return text if text else "본사"
+
+
+def save_json_atomically(data: dict, destination: str) -> None:
+    target_dir = os.path.dirname(destination)
+    if target_dir:
+        os.makedirs(target_dir, exist_ok=True)
+
+    tmp_path = f"{destination}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as file:
+        json.dump(
+            data,
+            file,
+            ensure_ascii=False,
+            indent=4,
+        )
+
+    os.replace(tmp_path, destination)
+
+
+def backup_corrupt_data_file(filepath: str) -> None:
+    if not os.path.isfile(filepath):
+        return
+
+    try:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_filename = f"weekly_data_corrupt_{timestamp}.json"
+        backup_path = os.path.join(BACKUP_DIR, backup_filename)
+        os.replace(filepath, backup_path)
+        logger.warning(
+            "손상된 데이터 파일을 백업하고 기본 데이터로 복구함: backup_path=%s",
+            backup_path,
+        )
+    except Exception:
+        logger.exception("손상 데이터 파일 백업 실패")
+
 
 def normalize_weekly_data(raw_data: dict, default_loc: str) -> dict:
     """weekly_data JSON 구조를 강제 정규화하여 반환한다.
@@ -48,6 +88,7 @@ def normalize_weekly_data(raw_data: dict, default_loc: str) -> dict:
 
     return result
 
+
 def load_weekly_data(default_loc: str):
     current_monday = get_monday_str()
     default_data = {
@@ -62,16 +103,19 @@ def load_weekly_data(default_loc: str):
             if raw.get("week_start") == current_monday:
                 return normalize_weekly_data(raw, default_loc), False
         except (json.JSONDecodeError, IOError):
-            pass
+            logger.warning("주간 데이터 파일 손상/읽기 오류 발생")
+            backup_corrupt_data_file(DATA_FILE_PATH)
+
     return default_data, True
+
 
 def save_weekly_data(data: dict):
     try:
-        with open(DATA_FILE_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-        logger.info("주간 근무지 데이터 저장 성공")
+        save_json_atomically(data, DATA_FILE_PATH)
+        logger.info("주간 근무지 데이터 원자적 저장 성공")
     except Exception:
         logger.exception("주간 근무지 데이터 저장 실패")
+
 
 def load_json_locations() -> list:
     current_monday = get_monday_str()
@@ -85,8 +129,11 @@ def load_json_locations() -> list:
             if raw.get("week_start") == current_monday:
                 return normalize_weekly_data(raw, default_loc)["locations"]
         except (json.JSONDecodeError, IOError):
-            pass
+            logger.warning("주간 근무지 로드 중 데이터 손상/읽기 오류 발생")
+            backup_corrupt_data_file(DATA_FILE_PATH)
+
     return [default_loc] * 5
+
 
 def load_holiday_indices() -> list:
     current_monday = get_monday_str()
@@ -100,8 +147,11 @@ def load_holiday_indices() -> list:
             if raw.get("week_start") == current_monday:
                 return normalize_weekly_data(raw, default_loc)["holiday_indices"]
         except (json.JSONDecodeError, IOError):
-            pass
+            logger.warning("공휴일 인덱스 로드 중 데이터 손상/읽기 오류 발생")
+            backup_corrupt_data_file(DATA_FILE_PATH)
+
     return []
+
 
 def get_auto_doc_number(year_dir: str) -> str:
     if not os.path.exists(year_dir):

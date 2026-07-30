@@ -1,16 +1,21 @@
-import os
 import json
+import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
+
 from dotenv import load_dotenv
 
-from config import ENV_PATH, DATA_FILE_PATH, BASE_DIR
-from utils.logger_utils import logger
-from utils.file_utils import save_env_dict_atomically
-from repositories.weekly_data_repository import (
-    get_monday_str, normalize_default_location, normalize_weekly_data, load_json_locations
-)
+from config import BASE_DIR, DATA_FILE_PATH, ENV_PATH
 from repositories.settings_repository import load_env_dict
+from repositories.weekly_data_repository import (
+    get_monday_str,
+    load_json_locations,
+    normalize_default_location,
+    normalize_weekly_data,
+)
+from utils.file_utils import save_env_dict_atomically
+from utils.logger_utils import logger
+
 
 def save_basic_settings_gui(widgets: dict, window: tk.Toplevel):
     new_name = widgets['name'].get().strip()

@@ -1,6 +1,6 @@
 import os
-import sys
 import re
+import sys
 
 # --- 경로 관련 설정 ---
 if getattr(sys, 'frozen', False):
@@ -11,16 +11,15 @@ else:
     BUNDLE_DIR = BASE_DIR
 
 ENV_PATH = os.path.join(BASE_DIR, '.env')
-DATA_FILE_PATH = os.path.join(BASE_DIR, 'weekly_data.json')
+DATA_DIR = os.path.join(BASE_DIR, 'Data')
+DATA_FILE_PATH = os.path.join(DATA_DIR, 'weekly_data.json')
 TEMPLATE_PATH = os.path.join(BUNDLE_DIR, "Template", "Daily_Report_Template.xlsx")
 ADDRESSBOOK_FILENAME = "주소록.csv"
 
 # --- 로깅 및 백업 경로 설정 ---
 LOG_DIR = os.path.join(BASE_DIR, 'Logs')
 LOG_FILE_PATH = os.path.join(LOG_DIR, 'daily_report.log')
-BACKUP_DIR = os.path.join(BASE_DIR, 'Data', 'backups')
-if not os.path.exists(BACKUP_DIR):
-    os.makedirs(BACKUP_DIR, exist_ok=True)
+BACKUP_DIR = os.path.join(DATA_DIR, 'backups')
 
 # --- 정규식 패턴 ---
 INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')

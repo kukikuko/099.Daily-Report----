@@ -1,18 +1,20 @@
-import os
-import sys
 import json
+import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
+
 from dotenv import load_dotenv
 
-from config import BASE_DIR, ENV_PATH, DEFAULT_SUBJECT, DEFAULT_BODY
-from utils.file_utils import save_env_dict_atomically
-from repositories.weekly_data_repository import normalize_default_location
+from config import BASE_DIR, DEFAULT_BODY, DEFAULT_SUBJECT, ENV_PATH
 from repositories.settings_repository import migrate_env_if_needed
+from repositories.weekly_data_repository import normalize_default_location
+from utils.file_utils import save_env_dict_atomically
+from utils.logger_utils import logger
+
 
 def ensure_initial_setup(parent: tk.Tk) -> bool:
     """초기 .env 가 없으면 설정 마법사를 실행한다.
-    
+
     반환값:
         bool: True - 정상 준비 완료 (.env 존재함 또는 마법사 완수)
               False - 사용자가 마법사를 취소함
@@ -53,7 +55,7 @@ def ensure_initial_setup(parent: tk.Tk) -> bool:
     use_outlook = messagebox.askyesno(
         "설정",
         "📧 '아웃룩 메일 초안 자동 작성' 기능을 사용하시겠습니까?\n(나중에 설정에서 변경 가능)",
-        parent=parent
+        parent=parent,
     )
     outlook_val = "True" if use_outlook else "False"
 
@@ -61,7 +63,7 @@ def ensure_initial_setup(parent: tk.Tk) -> bool:
     messagebox.showinfo("설정", "👉 확인을 누르면 결과물을 저장할 '폴더 선택 창'이 열립니다.", parent=parent)
     default_dir = os.path.join(BASE_DIR, "Output")
     selected_dir = filedialog.askdirectory(initialdir=BASE_DIR, title="결과물 저장 폴더 선택", parent=parent)
-    input_dir = selected_dir.replace('/', '\\') if selected_dir else default_dir
+    input_dir = selected_dir.replace("/", "\\") if selected_dir else default_dir
 
     try:
         env_dict = {
@@ -70,6 +72,7 @@ def ensure_initial_setup(parent: tk.Tk) -> bool:
             "EMPLOYEE_ID": input_id_str,
             "DEFAULT_WORK_LOCATION": input_loc,
             "BASE_OUTPUT_DIR": input_dir,
+            "HOLIDAY_API_KEY": "",
             "OUTLOOK_ENABLE": outlook_val,
             "OUTLOOK_TO": "",
             "OUTLOOK_CC": "",
@@ -85,6 +88,11 @@ def ensure_initial_setup(parent: tk.Tk) -> bool:
         messagebox.showinfo("완료", "✅ 초기 환경 설정 저장이 완료되었습니다.", parent=parent)
         return True
 
-    except Exception as e:
-        messagebox.showerror("오류", f"❌ 설정 저장 실패: {e}", parent=parent)
+    except Exception:
+        logger.exception("초기 환경 설정 저장 실패")
+        messagebox.showerror(
+            "초기 설정 실패",
+            "초기 설정을 저장하지 못했습니다.\n로그 파일을 확인해 주세요.",
+            parent=parent,
+        )
         return False

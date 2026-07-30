@@ -1,26 +1,31 @@
 import os
-import time
+import sys
 import threading
-import pythoncom
-from datetime import datetime, timedelta
+import time
 import tkinter as tk
+from datetime import datetime, timedelta
 from tkinter import messagebox, simpledialog
+
+import pythoncom
 from dotenv import load_dotenv
 
-from config import (
-    ENV_PATH, TEMPLATE_PATH, BASE_DIR, DEFAULT_SUBJECT, DEFAULT_BODY
-)
-from utils.logger_utils import logger, open_log_folder
-from utils.file_utils import is_file_locked, ensure_dir_writable
-from utils.path_utils import sanitize_filename_part, parse_doc_number
-from services.excel_service import generate_excel_draft, export_final_reports
-from services.outlook_service import create_outlook_draft
-from services.holiday_service import get_holidays_this_week
+from config import BASE_DIR, ENV_PATH, TEMPLATE_PATH
+from models.report_data import DailyReportData
 from repositories.weekly_data_repository import (
-    load_weekly_data, save_weekly_data, get_auto_doc_number, normalize_default_location
+    get_auto_doc_number,
+    load_weekly_data,
+    normalize_default_location,
+    save_weekly_data,
 )
-from ui.settings_window import open_settings_window
+from services.excel_service import export_final_reports, generate_excel_draft
+from services.holiday_service import get_holidays_this_week
+from services.outlook_service import create_outlook_draft
+from ui.initial_setup_window import ensure_initial_setup
 from ui.outlook_settings_window import open_outlook_settings_window
+from ui.settings_window import open_settings_window
+from utils.file_utils import ensure_dir_writable, is_file_locked
+from utils.logger_utils import logger, open_log_folder
+from utils.path_utils import parse_doc_number, sanitize_filename_part
 
 # GUI 전역 참조 변수
 status_label = None
@@ -308,15 +313,30 @@ def start_automation_wrapper(root_window):
             update_status("작업 취소됨")
             return
 
-    report_data = {
-        "report_date": now.strftime("%Y-%m-%d"),
-        "department": DEPARTMENT,
-        "work_location": current_location_header,
-        "author_name": AUTHOR_NAME,
-        "headcount": 1,
-        "doc_number": user_num,
-        "work_content": "", "tomorrow_work": "", "notes": ""
-    }
+    report_obj = DailyReportData(
+        report_date=now.strftime("%Y-%m-%d"),
+        department=DEPARTMENT,
+        work_location=current_location_header,
+        author_name=AUTHOR_NAME,
+        headcount=1,
+        doc_number=user_num,
+        employee_id=EMPLOYEE_ID,
+        work_content="",
+        tomorrow_work="",
+        notes="",
+    )
+
+    val_errors = report_obj.validate()
+    if val_errors:
+        messagebox.showerror(
+            "입력 오류",
+            "\n".join(val_errors),
+            parent=root_window,
+        )
+        return
+
+    report_data = report_obj.to_dict()
+
 
     start_button.config(state=tk.DISABLED)
     settings_button.config(state=tk.DISABLED)
@@ -330,10 +350,9 @@ def start_automation_wrapper(root_window):
     )
     t.start()
 
-import sys
-from ui.initial_setup_window import ensure_initial_setup
 
 def main_gui():
+
     global status_label, start_button, settings_button, outlook_button
 
     logger.info("Daily Report Automation 프로그램 시작")
@@ -347,8 +366,16 @@ def main_gui():
         sys.exit(0)
 
     def on_closing():
+        if start_button and str(start_button["state"]) == str(tk.DISABLED):
+            if not messagebox.askyesno(
+                "작업 중",
+                "현재 보고서 생성 작업이 진행 중입니다.\n작업이 끝난 뒤 종료하는 것이 안전합니다.\n\n그래도 종료하시겠습니까?",
+                parent=root,
+            ):
+                return
         logger.info("Daily Report Automation 프로그램 종료")
         root.destroy()
+
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
 

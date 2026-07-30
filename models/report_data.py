@@ -1,6 +1,5 @@
-from dataclasses import dataclass, asdict
-from datetime import date
-from utils.path_utils import sanitize_filename_part
+from dataclasses import asdict, dataclass
+
 
 @dataclass(slots=True)
 class DailyReportData:
@@ -35,12 +34,17 @@ class DailyReportData:
     @classmethod
     def from_dict(cls, data: dict) -> 'DailyReportData':
         """dict 데이터로부터 DailyReportData 객체를 생성한다."""
+        try:
+            headcount = int(data.get("headcount", 1))
+        except (TypeError, ValueError):
+            headcount = 1
+
         return cls(
             report_date=str(data.get("report_date", "")).strip(),
             department=str(data.get("department", "")).strip(),
             work_location=str(data.get("work_location", "")).strip(),
             author_name=str(data.get("author_name", "")).strip(),
-            headcount=int(data.get("headcount", 1)),
+            headcount=headcount,
             doc_number=str(data.get("doc_number", "001")).strip(),
             employee_id=str(data.get("employee_id", "000")).strip(),
             work_content=str(data.get("work_content", "")).strip(),
